@@ -25,19 +25,10 @@ args = vars(ap.parse_args())
 
 main_dir = str(os.path.dirname(__file__)) + '/'
 
-LOCAL_CLASS = {'cedula':{
-                'min' :[160, 410],
-                'max' : [923, 478]
-            },
-            'apellidos':{
-                'min' :[150, 510],
-                'max' : [1094, 570]
-            },
-            'nombres':{
-                'min' :[144, 695],
-                'max' : [1094, 755]
-            }
-       }
+LOCAL_CLASS = {'cedula':[(160/4, 410/4),(923/4, 410/4), (923/4, 478/4), (160/4, 478/4)],
+               'apellidos':[(150/4, 510/4),(1094/4, 510/4), (1094/4, 570/4), (150/4, 570/4)],
+               'nombres':[(144/4, 695/4),(1094/4, 695/4), (1094/4, 755/4), (144/4, 755/4)]
+               }
 
 def load_names():
     female_df = pd.read_csv(main_dir+'female_names.csv',
@@ -57,11 +48,42 @@ def load_names():
 
 names,  lastnames= load_names()
 
+def image_resize(image, width = None, height = None, inter = cv2.INTER_AREA):
+    # initialize the dimensions of the image to be resized and
+    # grab the image size
+    dim = None
+    (h, w) = image.shape[:2]
+
+    # if both the width and height are None, then return the
+    # original image
+    if width is None and height is None:
+        return image
+
+    # check to see if the width is None
+    if width is None:
+        # calculate the ratio of the height and construct the
+        # dimensions
+        r = height / float(h)
+        dim = (int(w * r), height)
+
+    # otherwise, the height is None
+    else:
+        # calculate the ratio of the width and construct the
+        # dimensions
+        r = width / float(w)
+        dim = (width, int(h * r))
+
+    # resize the image
+    resized = cv2.resize(image, dim, interpolation = inter)
+
+    # return the resized image
+    return resized
+
 def generate_id_number():
     if bool(random.getrandbits(1)):
-        num = int(random.gauss(1100000000,100000000)) #Gaussian distribution for number new ID
+        num = random.randint(1000000000,1100000000) #Gaussian distribution for number new ID
     else:
-        num = int(random.gauss(5000000,4000000)) #Gaussian distribution for number for old Id
+        num = int(random.gauss(5000000,400000)) #Gaussian distribution for number for old Id
     return '{:,}'.format(num).replace(',','.')
 
 def generate_full_name():
@@ -126,7 +148,7 @@ def aply_deformation(img):
 
     #Gamma Correction
     #random gamma to change light conditions
-    g = round(random.uniform(0.1, 0.80), 2) if bool(random.getrandbits(1)) else random.randint(3, 10)
+    g = round(random.uniform(0.1, 0.80), 2) if bool(random.getrandbits(1)) else random.randint(3, 6)
     gray = (255**(1-g))*(gray**g)
 
     noises=["gauss", "s&p"]
@@ -135,7 +157,7 @@ def aply_deformation(img):
         noise = random.choice(noises)
         noises.remove(noise)
         gray = noisy(noise, gray)
-    out_image = rotate_bound(gray.astype(np.uint8), random.randint(0, 360))
+    out_image = rotate_bound(gray.astype(np.uint8), random.randint(0, 180))
     return out_image
 
 def write_text_on_image(img,
@@ -174,35 +196,37 @@ def write_text_on_image_custom_font(img,
     img = np.array(img_pil)
     return img;
 
-def rotate_rectangle(x,y, cx, cy, deg_angle):
-    angle = np.deg2rad(deg_angle)
-    x_out = int(np.cos(angle)* (x-cx) - np.sin(angle) *(y-cy) + cx)
-    y_out = int(np.sin(angle)* (x-cx) - np.cos(angle) *(y-cy) + cy)
-    return [x_out, y_out]
+def rotate_box(bb, cx, cy, h, w, theta):
+    new_bb = list(bb)
+    for i,coord in enumerate(bb):
+        # opencv calculates standard transformation matrix
+        M = cv2.getRotationMatrix2D((cx, cy), theta, 1.0)
+        # Grab  the rotation components of the matrix)
+        cos = np.abs(M[0, 0])
+        sin = np.abs(M[0, 1])
+        # compute the new bounding dimensions of the image
+        nW = int((h * sin) + (w * cos))
+        nH = int((h * cos) + (w * sin))
+        # adjust the rotation matrix to take into account translation
+        M[0, 2] += (nW / 2) - cx
+        M[1, 2] += (nH / 2) - cy
+        # Prepare the vector to be transformed
+        v = [coord[0],coord[1],1]
+        # Perform the actual rotation and return the image
+        calculated = np.dot(M,v)
+        new_bb[i] = (int(calculated[0]),int(calculated[1]))
+    return new_bb
 
 def rotate_bound(image, angle):
-    local_class = copy.deepcopy(LOCAL_CLASS)
+    global LOCAL_CLASS
     # grab the dimensions of the image and then determine the
     # center
     (h, w) = image.shape[:2]
     (cX, cY) = (w // 2, h // 2)
-    print(LOCAL_CLASS)
-    for clases, coordinates in local_class.items():
-        local_class[clases]['min'] = rotate_rectangle(local_class[clases]['min'][0],
-                                                      local_class[clases]['min'][1],
-                                                      cX,
-                                                      cY,
-                                                      angle)
-        local_class[clases]['max'] = rotate_rectangle(local_class[clases]['max'][0],
-                                                      local_class[clases]['max'][1],
-                                                      cX,
-                                                      cY,
-                                                      angle)
-    print(local_class)
     # grab the rotation matrix (applying the negative of the
     # angle to rotate clockwise), then grab the sine and cosine
     # (i.e., the rotation components of the matrix)
-    M = cv2.getRotationMatrix2D((cX, cY), -angle, 1.0)
+    M = cv2.getRotationMatrix2D((cX, cY), angle, 1.0)
     cos = np.abs(M[0, 0])
     sin = np.abs(M[0, 1])
 
@@ -213,33 +237,62 @@ def rotate_bound(image, angle):
     # adjust the rotation matrix to take into account translation
     M[0, 2] += (nW / 2) - cX
     M[1, 2] += (nH / 2) - cY
-
     # perform the actual rotation and return the image
-    return cv2.warpAffine(image, M, (nW, nH))
+    img = cv2.warpAffine(image, M, (nW, nH))
+
+    #bounding box
+    print(LOCAL_CLASS)
+    for clases, coordinates in LOCAL_CLASS.items():
+        box =rotate_box(coordinates,
+                        cX,
+                        cY,
+                        h,
+                        w,
+                        angle)
+        LOCAL_CLASS[clases] = box
+        # cv2.line(img, box[0], box[3], 0, 2)
+        # cv2.line(img, box[0], box[1], 0, 2)
+        # cv2.line(img, box[1], box[2], 0, 2)
+        # cv2.line(img, box[2], box[3], 0, 2)
+    print(LOCAL_CLASS)
+    return img
 
 def deform_id(img_path):
     iter= int(args['number']) if args['number'] != None else 1
     base_name = img_path.split('/')[-1]
     image = cv2.imread(img_path)
+    image = cv2.resize(image,(537,330))
     sub_folder = 'output'
     for i in range(iter):
         name, lastname = generate_full_name()
         txts = [{"txt": generate_id_number(),
-                "bottomLeftCornerOfText": (390, 405),
+                "bottomLeftCornerOfText": (390/4, 405/4),
                 "fontColor": (55,55,55,0),
-                "fontSize": 83},
+                "fontSize": int(83/4)},
                 {"txt": lastname,
-                        "bottomLeftCornerOfText": (154, 510),
+                        "bottomLeftCornerOfText": (154/4, 510/4),
                         "fontColor": (55,55,55,0),
-                        "fontSize": 65},
+                        "fontSize": int(65/4)},
                 {"txt": name,
-                        "bottomLeftCornerOfText": (148, 698),
+                        "bottomLeftCornerOfText": (148/4, 698/4),
                         "fontColor": (55,55,55,0),
-                        "fontSize": 65}]
+                        "fontSize": int(65/4)}]
         image_out = aply_deformation(write_text_on_image_custom_font(image, txts))
-
-        print('Saving: '+main_dir+sub_folder+'/'+str(i+1)+'_{}.png'.format(base_name.split('.')[0]))
-        cv2.imwrite(main_dir+sub_folder+'/'+str(i+1)+'_{}.png'.format(base_name.split('.')[0]), image_out)
+        image_path = main_dir+sub_folder+'/'+str(i+1)+'_{}.png'.format(base_name.split('.')[0])
+        print('Making anotations for ML')
+        h, w = image_out.shape[:2]
+        am.set_writer(image_path, h,w,)
+        for clases, coordinates in LOCAL_CLASS.items():
+            box = np.array(LOCAL_CLASS[clases])
+            am.label_image(clases,
+                           np.min(box[:,0]),
+                           np.min(box[:,1]),
+                           np.max(box[:,0]),
+                           np.max(box[:,1]))
+        am.save_anotations()
+        am.clear_writer()
+        print('Saving: '+image_path)
+        cv2.imwrite(image_path, image_out)
 
 if __name__ == '__main__':
     if args['image'] != None:
