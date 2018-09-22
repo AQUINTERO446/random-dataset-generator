@@ -15,12 +15,12 @@ import anotations_maker as am
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
 ap.add_argument('-i', '--image',
-	help='path to input template image')
+                help='path to input template image')
 ap.add_argument('-n', '--number',
-    type=int,
-	help='number of image to generate')
+                type=int,
+                help='number of image to generate')
 ap.add_argument('-f', '--folder',
-    help='path to input template images')
+                help='path to input template images')
 args = vars(ap.parse_args())
 
 main_dir = str(os.path.dirname(__file__)) + '/'
@@ -47,6 +47,20 @@ def load_names():
     return names['name'].tolist(), lastName_df['surname'].tolist()
 
 names,  lastnames= load_names()
+
+def transform(img, pt1, pt2= False):
+    x,y,h,w = pt1
+    if not pt2:
+        xt, yt, ht, wt = pt2
+    else:
+        xt = 0
+        yt = 0
+        ht = pt1[2]
+        wt= pt1[3]
+
+    pts1 = np.float32([[y,x], [y+h,x], [y,x+w], [y+h,x+w]])
+    pts2 = np.float32([[yt,xt],[yt+ht,xt],[yt,xt+wt],[yt+ht,xt+wt]])
+    dst = cv2.warpPerspective(img,M,(w,h))
 
 def image_resize(image, width = None, height = None, inter = cv2.INTER_AREA):
     # initialize the dimensions of the image to be resized and
@@ -196,25 +210,16 @@ def write_text_on_image_custom_font(img,
     img = np.array(img_pil)
     return img;
 
-def rotate_box(bb, cx, cy, h, w, theta):
+def transform_point(point, M):
+    # Prepare the vector to be transformed
+    v = [point[0],point[1],1]
+    calculated = np.dot(M,v)
+    return (int(calculated[0]),int(calculated[1]))
+
+def rotate_box(bb, M):
     new_bb = list(bb)
-    for i,coord in enumerate(bb):
-        # opencv calculates standard transformation matrix
-        M = cv2.getRotationMatrix2D((cx, cy), theta, 1.0)
-        # Grab  the rotation components of the matrix)
-        cos = np.abs(M[0, 0])
-        sin = np.abs(M[0, 1])
-        # compute the new bounding dimensions of the image
-        nW = int((h * sin) + (w * cos))
-        nH = int((h * cos) + (w * sin))
-        # adjust the rotation matrix to take into account translation
-        M[0, 2] += (nW / 2) - cx
-        M[1, 2] += (nH / 2) - cy
-        # Prepare the vector to be transformed
-        v = [coord[0],coord[1],1]
-        # Perform the actual rotation and return the image
-        calculated = np.dot(M,v)
-        new_bb[i] = (int(calculated[0]),int(calculated[1]))
+    for i,point in enumerate(bb):
+        new_bb[i] = transform_point(point, M)
     return new_bb
 
 def rotate_bound(image, angle):
@@ -243,12 +248,7 @@ def rotate_bound(image, angle):
     #bounding box
     print(LOCAL_CLASS)
     for clases, coordinates in LOCAL_CLASS.items():
-        box =rotate_box(coordinates,
-                        cX,
-                        cY,
-                        h,
-                        w,
-                        angle)
+        box =rotate_box(coordinates, M)
         LOCAL_CLASS[clases] = box
         # cv2.line(img, box[0], box[3], 0, 2)
         # cv2.line(img, box[0], box[1], 0, 2)
